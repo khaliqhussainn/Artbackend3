@@ -2,39 +2,41 @@ const jwtProvider = require("../config/jwtProvider.js");
 const userService = require("../service/userService.js");
 
 const authenticate = async (req, res, next) => {
- 
     try {
         const token = req.headers.authorization?.split(" ")[1];
         if (!token) {
-            return res.status(404).send({ error: "Token not found....." });
+            return res.status(401).send({ error: "Token not found. Please login." });
         }
-
+        
         const userId = jwtProvider.getUserIdFromToken(token);
         const user = await userService.findUserById(userId);
+        
+        if (!user) {
+            return res.status(404).send({ error: "User not found" });
+        }
+        
         req.user = user;
-
+        next();
     } catch (error) {
-        return res.status(500).send({ error: error.message });
+        return res.status(401).send({ error: "Authentication failed: " + error.message });
     }
-    next();
 };
 
 const isAdmin = (req, res, next) => {
     if (req.user && req.user.role === 'admin') {
-      next();
+        next();
     } else {
-      res.status(403).json({ message: 'Forbidden' });
+        res.status(403).json({ message: 'Forbidden: Admin access required' });
     }
-  };
+};
 
 const localVariables = (req, res, next) => {
-   console.log('local')
+    console.log('Setting local variables');
     req.app.locals = {
-        OTP : null,
+        OTP: null,
         resetSession: false
     }
-    next()
+    next();
 }
 
-
-module.exports = {authenticate, isAdmin}
+module.exports = { authenticate, isAdmin, localVariables };

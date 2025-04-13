@@ -2,13 +2,23 @@ const userService = require("../service/userService")
 const otpGererator = require("otp-generator")
 const bcrypt = require("bcrypt")
 const UserModel = require("../models/userModel")
+const jwtProvider = require("../config/jwtProvider")
 
 const getUserProfile = async (req, res) => {
   try {
     const jwt = req.headers.authorization?.split(" ")[1];
 
     if (!jwt) {
-      return res.status(404).send({ error: "token not found" });
+      return res.status(401).send({ error: "token not found" });
+    }
+
+    // Extract userId from token and set it in req object
+    try {
+      const userId = jwtProvider.getUserIdFromToken(jwt);
+      req.userId = userId;
+      req.user = { id: userId }; // Set both for compatibility
+    } catch (err) {
+      return res.status(401).send({ error: "Invalid token" });
     }
 
     const user = await userService.getUserProfileByToken(jwt);
@@ -19,7 +29,7 @@ const getUserProfile = async (req, res) => {
   }
 }
 
-const getAllUsers = async (req,res) => {
+const getAllUsers = async (req, res) => {
     try {
         const users = await userService.getAllUsers()
         return res.status(200).send(users)
@@ -40,35 +50,31 @@ const getUserById = async (req, res) => {
 
 const verifyUser = async (req, res, next) => {
   try {
-      
       const { email } = req.method == "GET" ? req.query : req.body;
 
       // check the user existance
       let exist = await UserModel.findOne({ email });
       if(!exist) return res.status(404).send({ error : "Can't find User!"});
       next();
-
   } catch (error) {
       return res.status(404).send({ error: "Authentication Error"});
   }
 }
 
-// let generatedOTP = null;
-
 const generateOTP = async (req, res) => {
-  req.app.locals.OTP = await otpGererator.generate(6,{lowerCaseAlphabets: false, upperCaseAlphabets: false, specialChars: false});
+  req.app.locals.OTP = await otpGererator.generate(6, {
+    lowerCaseAlphabets: false, 
+    upperCaseAlphabets: false, 
+    specialChars: false
+  });
 
-  res.status(201).send({code: req.app.locals.OTP});
+  res.status(201).send({ code: req.app.locals.OTP });
 };
 
 const verifyOTP = async (req, res) => {
   const { code } = req.query;
- 
-
   const localOTP = parseInt(req.app.locals.OTP);
   const receivedCode = parseInt(code);
-
-
 
   if (localOTP === receivedCode) {
     req.app.locals.OTP = null;
@@ -78,53 +84,14 @@ const verifyOTP = async (req, res) => {
   return res.status(400).send({ error: "Invalid OTP" });
 };
 
-
 const createResetSession = async (req, res) => {
   if(req.app.locals.resetSession){
-    req.app.locals.resetSession = false,
+    req.app.locals.resetSession = false;
     res.status(201).send({msg: "Access Granted."});
+  } else {
+    return res.status(440).send({msg: "Session Expired"});
   }
-  return res.status(440).send({msg: "Session Expired"})
 }
-
-// const resetPassword = async (req,res) =>{
-//   try {
-      
-//       if(!req.app.locals.resetSession) return res.status(440).send({error : "Session expired!"});
-
-//       const { email, password } = req.body;
-
-//       try {
-          
-//           UserModel.findOne({email})
-//               .then(user => {
-//                   bcrypt.hash(password, 8)
-//                       .then(hashedPassword => {
-//                           UserModel.updateOne({ email : user.email },
-//                           { password: hashedPassword}, function(err, data){
-//                               if(err) throw err;
-//                               req.app.locals.resetSession = false; // reset session
-//                               return res.status(201).send({ msg : "Record Updated...!"})
-//                           });
-//                       })
-//                       .catch( e => {
-//                           return res.status(500).send({
-//                               error : "Enable to hashed password"
-//                           })
-//                       })
-//               })
-//               .catch(error => {
-//                   return res.status(404).send({ error : "Email not Found"});
-//               })
-
-//       } catch (error) {
-//           return res.status(500).send({ error })
-//       }
-
-//   } catch (error) {
-//       return res.status(401).send({ error })
-//   }
-// }
 
 const resetPassword = async (req, res) => {
   try {
@@ -151,57 +118,90 @@ const resetPassword = async (req, res) => {
   }
 };
 
-const updateProfile = async (req, res) => {
-
+// Make both names available for this method
+const updateUserProfile = async (req, res) => {
   try {
-    const userId = req.user.id;
- // Assuming you have authentication middleware
+    // Get userId from token authentication
+    const userId = req.user?.id || req.userId;
+    
+    if (!userId) {
+      return res.status(401).send({ error: "User not authenticated" });
+    }
+
     const { firstName, lastName, email } = req.body;
     const updatedUser = await userService.updateUserProfile(userId, { firstName, lastName, email });
 
-    res.status(200).json(updatedUser);
+    return res.status(200).send(updatedUser);
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    return res.status(400).send({ error: error.message });
   }
 };
 
 const addAddress = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id || req.userId;
+    
+    if (!userId) {
+      return res.status(401).send({ error: "User not authenticated" });
+    }
+
     const addressData = req.body;
     const updatedUser = await userService.addAddress(userId, addressData);
-    res.status(201).json(updatedUser);
+    
+    return res.status(201).send(updatedUser);
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    return res.status(400).send({ error: error.message });
   }
 };
 
 const updateAddress = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const { addressId } = req.params;
+    const userId = req.user?.id || req.userId;
+    
+    if (!userId) {
+      return res.status(401).send({ error: "User not authenticated" });
+    }
+
+    const addressId = req.params.id || req.params.addressId;
     const addressData = req.body;
-   
     
     const updatedUser = await userService.updateAddress(userId, addressId, addressData);
-    res.status(200).json(updatedUser);
+    
+    return res.status(200).send(updatedUser);
   } catch (error) {
- 
-    res.status(400).json({ error: error.message });
+    return res.status(400).send({ error: error.message });
   }
 };
 
 const deleteAddress = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const { addressId } = req.params;
+    const userId = req.user?.id || req.userId;
+    
+    if (!userId) {
+      return res.status(401).send({ error: "User not authenticated" });
+    }
+
+    const addressId = req.params.id || req.params.addressId;
     const updatedUser = await userService.deleteAddress(userId, addressId);
-    res.status(200).json(updatedUser);
+    
+    return res.status(200).send(updatedUser);
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    return res.status(400).send({ error: error.message });
   }
 };
 
-
-
-module.exports = {getUserProfile , getAllUsers, getUserById, generateOTP, verifyOTP, createResetSession, resetPassword, verifyUser, updateProfile, updateAddress, addAddress, deleteAddress}
+module.exports = {
+  getUserProfile,
+  getAllUsers,
+  getUserById,
+  generateOTP,
+  verifyOTP,
+  createResetSession,
+  resetPassword,
+  verifyUser,
+  updateUserProfile, // Changed from updateProfile to updateUserProfile
+  updateProfile: updateUserProfile, // Alias for backward compatibility
+  updateAddress,
+  addAddress,
+  deleteAddress
+}

@@ -10,7 +10,7 @@ const createAdminUser = async (req, res) => {
       email: adminEmail,
       password: adminPassword,
       role: 'admin',
-      firstName: 'Neeraj', // Add a firstName value
+      firstName: 'Khaliq', // Add a firstName value
       lastName: 'Admin', // Add a lastName value
     });
 
